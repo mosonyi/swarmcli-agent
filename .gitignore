@@ -1,0 +1,11 @@
+# Go build cache and module cache inside repo
+.go/
+.cache/
+bin/
+certs/
+
+# VS Code settings
+.vscode/
+
+# Devcontainer metadata
+.devcontainer/*.log

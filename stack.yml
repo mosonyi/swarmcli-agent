@@ -1,0 +1,56 @@
+
+networks:
+  agent-net:
+    driver: overlay
+    internal: true
+
+services:
+  agent:
+    image: mosonyi/swarmcli-agent:latest
+    deploy:
+      mode: global
+    networks: [agent-net]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  proxy:
+    image: mosonyi/swarmcli-proxy:latest
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+    networks: [agent-net]
+    ports:
+      - "8443:8443"
+    environment:
+      - AGENT_SERVICE=stack_agent   # 👈 full name with stack prefix
+      - OVERLAY_NAME=stack_agent-net
+      - PROXY_TLS_CERT=/run/secrets/proxy_client_cert
+      - PROXY_TLS_KEY=/run/secrets/proxy_client_key
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock  
+    secrets:
+      - proxy_client_cert
+      - proxy_client_key
+      - agent_ca
+
+  # Optional CLI service (for debugging / testing)
+  cli:
+    image: mosonyi/swarmcli:latest
+    deploy:
+      replicas: 0
+    networks: [agent-net]
+    entrypoint: ["/swarmcli"]
+    command: ["-task", "<TASK_ID>", "-proxy", "wss://proxy:8443", "-cmd", "/bin/sh"]
+
+
+secrets:
+  agent_cert:
+    external: true
+  agent_key:
+    external: true
+  agent_ca:
+    external: true
+  proxy_client_cert:
+    external: true
+  proxy_client_key:
+    external: true

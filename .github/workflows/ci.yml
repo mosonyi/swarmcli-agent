@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Build Agent
+        run: docker build -f Dockerfile.agent -t swarmc-agent:test .
+
+      - name: Build Proxy
+        run: docker build -f Dockerfile.proxy -t swarmcli-proxy:test .
+
+      - name: Go vet & tidy
+        run: |
+          go vet ./...
+          go mod tidy
+          git diff --exit-code || (echo "Run go mod tidy locally" && exit 1)
+
+      - name: Run CLI build
+        run: go build -o swarmcli ./cmd/cli
+
+      - name: Run Test Client (basic)
+        run: go run ./cmd/test -help
