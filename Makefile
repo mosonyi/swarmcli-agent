@@ -1,7 +1,6 @@
 IMAGE_ORG ?= mosonyi
-AGENT_IMAGE := $(IMAGE_ORG)/swarmcli-agent:latest
-PROXY_IMAGE := $(IMAGE_ORG)/swarmcli-proxy:latest
-CLI_IMAGE := $(IMAGE_ORG)/swarmcli:latest
+AGENT_IMAGE := $(IMAGE_ORG)/swarmcli-agent:local
+PROXY_IMAGE := $(IMAGE_ORG)/swarmcli-proxy:local
 
 BIN_DIR := bin
 
@@ -16,14 +15,8 @@ push:
 	docker push $(AGENT_IMAGE)
 	docker push $(PROXY_IMAGE)
 
-cli-build:
-	docker build -f Dockerfile.cli -t $(CLI_IMAGE) .
-
-cli-push:
-	docker push $(CLI_IMAGE)
-
-all-build: build cli-build
-all-push: push cli-push
+all-build: build
+all-push: push
 
 # --- Local Go builds ---
 local-build: $(BIN_DIR)
