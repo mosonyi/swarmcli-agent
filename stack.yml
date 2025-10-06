@@ -26,6 +26,7 @@ services:
       - OVERLAY_NAME=stack_agent-net
       - PROXY_TLS_CERT=/run/secrets/proxy_client_cert
       - PROXY_TLS_KEY=/run/secrets/proxy_client_key
+      - PROXY_CA_CERT=/run/secrets/agent_ca
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock  
     secrets:

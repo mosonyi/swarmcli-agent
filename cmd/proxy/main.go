@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -193,14 +194,22 @@ func main() {
 	srv := &http.Server{Addr: addr, Handler: mux}
 
 	if cert, key := os.Getenv("PROXY_TLS_CERT"), os.Getenv("PROXY_TLS_KEY"); cert != "" && key != "" {
-		if srv.TLSConfig == nil {
-			srv.TLSConfig = &tls.Config{}
+		caCert := os.Getenv("PROXY_CA_CERT")
+		caCertPool := x509.NewCertPool()
+		caCertData, err := os.ReadFile(caCert)
+		if err != nil {
+			log.Fatalf("failed to read CA cert: %v", err)
 		}
-		log.Printf("proxy TLS on %s", addr)
+		caCertPool.AppendCertsFromPEM(caCertData)
+
+		srv.TLSConfig = &tls.Config{
+			ClientCAs:  caCertPool,
+			ClientAuth: tls.RequireAndVerifyClientCert, // 👈 Enforce mTLS
+			MinVersion: tls.VersionTLS13,
+		}
+
+		log.Printf("proxy TLS (mTLS) on %s", addr)
 		log.Fatal(srv.ListenAndServeTLS(cert, key))
-	} else {
-		log.Printf("proxy on %s", addr)
-		log.Fatal(srv.ListenAndServe())
 	}
 }
 
