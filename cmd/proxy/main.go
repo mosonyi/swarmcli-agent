@@ -194,23 +194,32 @@ func main() {
 	srv := &http.Server{Addr: addr, Handler: mux}
 
 	if cert, key := os.Getenv("PROXY_TLS_CERT"), os.Getenv("PROXY_TLS_KEY"); cert != "" && key != "" {
-		caCert := os.Getenv("PROXY_CA_CERT")
-		caCertPool := x509.NewCertPool()
-		caCertData, err := os.ReadFile(caCert)
-		if err != nil {
-			log.Fatalf("failed to read CA cert: %v", err)
+		caCertPath := os.Getenv("PROXY_CA_CERT")
+		if caCertPath == "" {
+			log.Fatal("missing PROXY_CA_CERT environment variable")
 		}
-		caCertPool.AppendCertsFromPEM(caCertData)
 
-		srv.TLSConfig = &tls.Config{
-			ClientCAs:  caCertPool,
-			ClientAuth: tls.RequireAndVerifyClientCert, // 👈 Enforce mTLS
+		caCert, err := os.ReadFile(caCertPath)
+		if err != nil {
+			log.Fatalf("read CA cert: %v", err)
+		}
+
+		caPool := x509.NewCertPool()
+		if !caPool.AppendCertsFromPEM(caCert) {
+			log.Fatal("invalid CA cert")
+		}
+
+		tlsConfig := &tls.Config{
+			ClientAuth: tls.RequireAndVerifyClientCert,
+			ClientCAs:  caPool,
 			MinVersion: tls.VersionTLS13,
 		}
 
-		log.Printf("proxy TLS (mTLS) on %s", addr)
+		srv.TLSConfig = tlsConfig
+		log.Printf("proxy TLS (mutual auth) on %s", addr)
 		log.Fatal(srv.ListenAndServeTLS(cert, key))
 	}
+
 }
 
 func getenv(k, d string) string {

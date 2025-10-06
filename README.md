@@ -96,13 +96,18 @@ This loads all required certs into Docker Swarm as secrets.
 
 ```bash
 make all-build
-make all-push
 ```
 
 ### 4. Deploy the Stack
 
 ```bash
 docker stack deploy -c stack.yml swarmctl
+```
+
+Test it:
+```bash
+curl -k  --cert certs/agent.crt   --key certs/agent.key   --cacert certs/ca.crt  https://localhost:8443/health
+{"status":"ok"}
 ```
 
 This deploys:

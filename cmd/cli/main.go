@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"flag"
 	"fmt"
 	"log"
@@ -15,10 +16,27 @@ import (
 )
 
 func dialWS(u url.URL) (*websocket.Conn, error) {
+	cert, err := tls.LoadX509KeyPair("certs/agent.crt", "certs/agent.key")
+	if err != nil {
+		log.Fatalf("cannot load client cert: %v", err)
+	}
+
+	caCert, err := os.ReadFile("certs/ca.crt")
+	if err != nil {
+		log.Fatalf("cannot read ca cert: %v", err)
+	}
+	caPool := x509.NewCertPool()
+	caPool.AppendCertsFromPEM(caCert)
+
 	dialer := *websocket.DefaultDialer
-	dialer.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-	c, _, err := dialer.Dial(u.String(), nil) // discard *http.Response
-	return c, err
+	dialer.TLSClientConfig = &tls.Config{
+		RootCAs:      caPool,
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS13,
+	}
+
+	conn, _, err := dialer.Dial(u.String(), nil)
+	return conn, err
 }
 
 func modeExec(taskID, cmd, proxy string) {
@@ -83,7 +101,7 @@ func modeLogs(taskID, proxy string, tail int, follow bool) {
 		Scheme:   "wss",
 		Host:     proxy[6:],
 		Path:     "/v1/logs",
-		RawQuery: fmt.Sprintf("task_id=%s&tail=%d&follow=%t", taskID, tail, follow),
+		RawQuery: fmt.Sprintf("task_id=%s&follow=%t&tail=%d", taskID, follow, tail),
 	}
 	log.Printf("connecting to %s", u.String())
 
@@ -93,35 +111,40 @@ func modeLogs(taskID, proxy string, tail int, follow bool) {
 	}
 	defer c.Close()
 
-	interrupt := make(chan os.Signal, 1)
-	signal.Notify(interrupt, os.Interrupt, syscall.SIGTERM)
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 
+	done := make(chan struct{})
 	go func() {
 		for {
 			_, message, err := c.ReadMessage()
 			if err != nil {
-				return
+				break
 			}
 			os.Stdout.Write(message)
 		}
+		close(done)
 	}()
 
-	<-interrupt
-	log.Println("interrupt: closing logs")
-	_ = c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+	select {
+	case <-sig:
+		log.Println("interrupt: closing logs stream")
+		c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+	case <-done:
+	}
 }
 
 func main() {
 	mode := flag.String("mode", "exec", "Mode: exec or logs")
-	taskID := flag.String("task", "", "Task ID")
+	taskID := flag.String("task", "", "Task ID to target")
 	cmd := flag.String("cmd", "hostname", "Command for exec mode")
 	proxy := flag.String("proxy", "wss://localhost:8443", "Proxy base URL")
-	tail := flag.Int("tail", 100, "Number of log lines to show")
-	follow := flag.Bool("follow", true, "Follow logs")
+	tail := flag.Int("tail", 10, "Number of log lines for logs mode")
+	follow := flag.Bool("follow", false, "Follow logs continuously")
 	flag.Parse()
 
 	if *taskID == "" {
-		fmt.Println("Usage: cli -mode [exec|logs] -task <task_id> [-cmd hostname] [-proxy wss://host:8443] [-tail N] [-follow=true]")
+		fmt.Println("Usage: cli -mode [exec|logs] -task <task_id> [-cmd hostname] [-proxy wss://host:8443] [-tail 10]")
 		os.Exit(1)
 	}
 

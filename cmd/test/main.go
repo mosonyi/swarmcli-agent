@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"flag"
 	"fmt"
 	"log"
@@ -15,11 +16,27 @@ import (
 )
 
 func dialWS(u url.URL) (*websocket.Conn, error) {
-	dialer := *websocket.DefaultDialer
-	dialer.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	cert, err := tls.LoadX509KeyPair("certs/agent.crt", "certs/agent.key")
+	if err != nil {
+		log.Fatalf("cannot load client cert: %v", err)
+	}
 
-	c, _, err := dialer.Dial(u.String(), nil) // discard resp
-	return c, err
+	caCert, err := os.ReadFile("certs/ca.crt")
+	if err != nil {
+		log.Fatalf("cannot read ca cert: %v", err)
+	}
+	caPool := x509.NewCertPool()
+	caPool.AppendCertsFromPEM(caCert)
+
+	dialer := *websocket.DefaultDialer
+	dialer.TLSClientConfig = &tls.Config{
+		RootCAs:      caPool,
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS13,
+	}
+
+	conn, _, err := dialer.Dial(u.String(), nil)
+	return conn, err
 }
 
 func modeExec(taskID, cmd, proxy string) {
@@ -45,10 +62,8 @@ func modeExec(taskID, cmd, proxy string) {
 
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt, syscall.SIGTERM)
-	done := make(chan struct{})
 
 	go func() {
-		defer close(done)
 		for {
 			_, message, err := c.ReadMessage()
 			if err != nil {
@@ -56,7 +71,7 @@ func modeExec(taskID, cmd, proxy string) {
 			}
 			if string(message) == "EXEC_FINISHED" {
 				log.Println("session finished")
-				return
+				os.Exit(0)
 			}
 			os.Stdout.Write(message)
 		}
@@ -65,8 +80,6 @@ func modeExec(taskID, cmd, proxy string) {
 	buf := make([]byte, 1024)
 	for {
 		select {
-		case <-done:
-			return
 		case <-interrupt:
 			log.Println("interrupt: closing connection")
 			c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
@@ -88,7 +101,7 @@ func modeLogs(taskID, proxy string, tail int) {
 		Scheme:   "wss",
 		Host:     proxy[6:],
 		Path:     "/v1/logs",
-		RawQuery: fmt.Sprintf("task_id=%s&follow=1&tail=%d", taskID, tail),
+		RawQuery: fmt.Sprintf("task_id=%s&follow=0&tail=%d", taskID, tail),
 	}
 	log.Printf("connecting logs to %s", u.String())
 
@@ -98,22 +111,13 @@ func modeLogs(taskID, proxy string, tail int) {
 	}
 	defer c.Close()
 
-	interrupt := make(chan os.Signal, 1)
-	signal.Notify(interrupt, os.Interrupt, syscall.SIGTERM)
-
-	go func() {
-		for {
-			_, message, err := c.ReadMessage()
-			if err != nil {
-				return
-			}
-			os.Stdout.Write(message)
+	for {
+		_, message, err := c.ReadMessage()
+		if err != nil {
+			return
 		}
-	}()
-
-	<-interrupt
-	log.Println("interrupt: closing logs")
-	_ = c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+		os.Stdout.Write(message)
+	}
 }
 
 func main() {
